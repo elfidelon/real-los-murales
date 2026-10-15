@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Real los Murales</title>
+  <style>
+    :root {
+      --bg: #0e1013;
+      --panel: rgba(18, 21, 26, .8);
+      --line: rgba(255, 255, 255, .12);
+      --text: #eef1f4;
+      --muted: #a3acb6;
+      --accent: #5ad1c6;
+      --on-accent: #06201d;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+    canvas { display: block; touch-action: none; }
+
+    #loader { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: var(--bg);
+      transition: opacity .5s; }
+    #loader.done { opacity: 0; pointer-events: none; }
+    #loader .box { width: min(320px, 80vw); text-align: center; }
+    #loader h1 { font-size: 15px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; margin: 0 0 14px; }
+    #loader .bar { height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; }
+    #loader .fill { height: 100%; width: 0; background: var(--accent); transition: width .15s; }
+    #loader p { font-size: 13px; color: var(--muted); margin: 10px 0 0; font-variant-numeric: tabular-nums; }
+
+    #ui { position: fixed; z-index: 10; left: 50%; bottom: 16px; transform: translateX(-50%);
+      display: flex; gap: 6px; padding: 6px; background: var(--panel); border: 1px solid var(--line);
+      border-radius: 12px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+      max-width: calc(100vw - 32px); flex-wrap: wrap; justify-content: center; }
+    #ui button { appearance: none; border: 0; background: transparent; color: var(--text); font: inherit;
+      font-size: 13px; padding: 9px 12px; border-radius: 8px; cursor: pointer; white-space: nowrap; }
+    #ui button:hover { background: rgba(255, 255, 255, .08); }
+    #ui button[aria-pressed="true"] { background: rgba(255, 255, 255, .16); font-weight: 600; }
+    #ui .sep { width: 1px; background: var(--line); margin: 4px 2px; }
+
+    #title, #hint { position: fixed; z-index: 10; top: 16px; padding: 8px 12px; background: var(--panel);
+      border: 1px solid var(--line); border-radius: 10px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+    #title { left: 16px; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; font-weight: 600; }
+    #hint { right: 16px; max-width: 320px; font-size: 12px; line-height: 1.5; color: var(--muted); }
+    #hint b { color: var(--text); }
+    #crosshair { position: fixed; z-index: 10; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px;
+      border-radius: 50%; background: rgba(255, 255, 255, .7); display: none; pointer-events: none; }
+    body.walking #crosshair { display: block; }
+    body.touch .desktop-only { display: none; }
+
+    /* Boton de VR: siempre visible; en lentes con WebXR va resaltado */
+    #ui #bVR { font-weight: 700; box-shadow: inset 0 0 0 1.5px var(--accent); color: var(--accent); }
+    #ui #bVR svg { width: 18px; height: 18px; vertical-align: -4px; margin-right: 6px; }
+    body.vr-ok #ui #bVR { background: var(--accent); color: var(--on-accent); font-size: 15px; padding: 10px 18px; }
+
+    #vrHelp { position: fixed; inset: 0; z-index: 30; display: none; place-items: center; padding: 16px;
+      background: rgba(0, 0, 0, .55); }
+    #vrHelp.open { display: grid; }
+    #vrHelp .card { width: min(400px, 100%); background: #171a1f; border: 1px solid var(--line); border-radius: 14px;
+      padding: 22px; line-height: 1.5; }
+    #vrHelp h2 { margin: 0 0 10px; font-size: 17px; }
+    #vrHelp ol { margin: 0 0 14px; padding-left: 20px; font-size: 14px; color: var(--muted); }
+    #vrHelp ol b { color: var(--text); }
+    #vrHelp .url { display: block; padding: 10px 12px; margin-bottom: 14px; background: rgba(255, 255, 255, .06);
+      border-radius: 8px; font: 600 14px ui-monospace, Menlo, monospace; color: var(--accent); word-break: break-all; }
+    #vrHelp .err { font-size: 12px; color: #ff8a7a; margin: -6px 0 12px; }
+    #vrHelp .row { display: flex; gap: 8px; justify-content: flex-end; }
+    #vrHelp button { appearance: none; border: 0; font: inherit; font-size: 13px; padding: 9px 14px; border-radius: 8px;
+      cursor: pointer; background: rgba(255, 255, 255, .08); color: var(--text); }
+    #vrHelp button.primary { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+    @media (max-width: 520px) {
+      #hint, #ui .sep, #ui .long { display: none; }
+      #ui { left: 16px; right: 16px; transform: none; max-width: none; }
+      #ui #bVR { flex-basis: 100%; }
+    }
+  </style>
+  <script type="importmap">
+    { "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/",
+      "@sparkjsdev/spark": "https://cdn.jsdelivr.net/npm/@sparkjsdev/spark@2.2.0/dist/spark.module.min.js"
+    } }
+  </script>
+</head>
+<body>
+  <div id="loader"><div class="box">
+    <h1>Real los Murales</h1>
+    <div class="bar"><div class="fill" id="fill"></div></div>
+    <p id="status">Cargando escena…</p>
+  </div></div>
+
+  <div id="title">Real los Murales</div>
+  <div id="hint"></div>
+  <div id="crosshair"></div>
+
+  <div id="vrHelp" role="dialog" aria-modal="true" aria-labelledby="vrHelpTitle"><div class="card">
+    <h2 id="vrHelpTitle">Ver en lentes VR</h2>
+    <p class="err" id="vrErr" hidden></p>
+    <ol>
+      <li>Ponte tus <b>Meta Quest</b> y abre el <b>Navegador</b> (Meta Browser).</li>
+      <li>Entra a esta dirección:</li>
+    </ol>
+    <span class="url" id="vrUrl"></span>
+    <ol start="3">
+      <li>Cuando cargue, pulsa <b>Entrar a VR</b>.</li>
+    </ol>
+    <div class="row">
+      <button id="bCopy">Copiar link</button>
+      <button id="bClose" class="primary">Entendido</button>
+    </div>
+  </div></div>
+
+  <div id="ui">
+    <button id="bVR"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3.5l-2-3h-3l-2 3H5a2 2 0 0 1-2-2z"/><circle cx="8" cy="11.5" r="1.5"/><circle cx="16" cy="11.5" r="1.5"/></svg>Entrar a VR</button>
+    <span class="sep"></span>
+    <button id="bOrbit" aria-pressed="true">Orbitar</button>
+    <button id="bWalk" class="desktop-only" aria-pressed="false">Caminar</button>
+    <span class="sep"></span>
+    <button id="bReset">Reiniciar<span class="long"> vista</span></button>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+    import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
+    import { SparkRenderer, SplatMesh } from '@sparkjsdev/spark';
+
+    // El splat viene con Y hacia abajo (convencion OpenCV) y en metros.
+    // Se voltea 180° en X y se sube para que el piso quede en y = 0.
+    const FLOOR = 0.97;                     // altura del piso en coordenadas del .ply
+    const CENTER = [-0.1, 0.1];             // punto de inicio en VR (x, z): sobre el tapete
+    // Orbita alrededor del centro del cuarto a menos de 1 m, asi la camara no atraviesa paredes
+    const START = { pos: [0.1, 1.5, 0.8], target: [0.1, 1.15, -0.1] };
+    const VR_YAW = 0;                       // en VR mira hacia la pared de la TV (-Z)
+
+    const isTouch = matchMedia('(pointer: coarse)').matches;
+    const isQuest = /OculusBrowser|Quest/i.test(navigator.userAgent);
+    if (isTouch) document.body.classList.add('touch');
+
+    // ---- Escena -------------------------------------------------------------
+    const renderer = new THREE.WebGLRenderer({ antialias: false });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.xr.enabled = true;
+    document.body.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0e1013);
+
+    const spark = new SparkRenderer({ renderer });
+    scene.add(spark);
+
+    const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.01, 1000);
+    const rig = new THREE.Group();          // se mueve con los sticks en VR
+    rig.add(camera);
+    scene.add(rig);
+
+    const world = new THREE.Group();
+    world.position.y = FLOOR;
+    scene.add(world);
+
+    // ---- Controles de escritorio / movil ------------------------------------
+    const orbit = new OrbitControls(camera, renderer.domElement);
+    orbit.enableDamping = true;
+    orbit.dampingFactor = 0.08;
+    orbit.screenSpacePanning = true;
+    orbit.minDistance = 0.05;
+    orbit.maxDistance = 6;
+
+    const walk = new PointerLockControls(camera, document.body);
+    let mode = 'orbit';
+    const keys = new Set();
+
+    function resetView() {
+      rig.position.set(0, 0, 0);
+      rig.rotation.set(0, 0, 0);
+      camera.position.set(...START.pos);
+      orbit.target.set(...START.target);
+      camera.lookAt(orbit.target);
+      orbit.update();
+    }
+
+    function setMode(m) {
+      mode = m;
+      bOrbit.setAttribute('aria-pressed', m === 'orbit');
+      bWalk.setAttribute('aria-pressed', m === 'walk');
+      orbit.enabled = m === 'orbit';
+      if (m === 'walk') {
+        walk.lock();
+      } else {
+        walk.unlock();
+        // el orbit sigue mirando hacia donde se estaba mirando
+        const dir = new THREE.Vector3();
+        camera.getWorldDirection(dir);
+        orbit.target.copy(camera.position).addScaledVector(dir, 1);
+        orbit.update();
+      }
+      updateHint();
+    }
+
+    walk.addEventListener('lock', () => document.body.classList.add('walking'));
+    walk.addEventListener('unlock', () => {
+      document.body.classList.remove('walking');
+      if (mode === 'walk') setMode('orbit');
+    });
+
+    addEventListener('keydown', e => keys.add(e.code));
+    addEventListener('keyup', e => keys.delete(e.code));
+    addEventListener('blur', () => keys.clear());
+
+    const bOrbit = document.getElementById('bOrbit');
+    const bWalk = document.getElementById('bWalk');
+    bOrbit.onclick = () => setMode('orbit');
+    bWalk.onclick = () => setMode('walk');
+    document.getElementById('bReset').onclick = () => { setMode('orbit'); resetView(); };
+
+    const hint = document.getElementById('hint');
+    function updateHint() {
+      hint.innerHTML = isQuest
+        ? 'Pulsa <b>Entrar a VR</b>. Stick izquierdo: moverte · Stick derecho: girar y subir/bajar · A: volver al inicio'
+        : mode === 'walk'
+          ? 'WASD para moverte · Q/E bajar/subir · Shift corre · Esc para salir'
+          : isTouch
+            ? 'Arrastra para girar · pellizca para acercar · dos dedos para mover'
+            : 'Arrastra para girar · rueda para acercar · clic derecho para mover';
+    }
+
+    // ---- Carga del splat ----------------------------------------------------
+    const fill = document.getElementById('fill');
+    const status = document.getElementById('status');
+    const loaderEl = document.getElementById('loader');
+    const SPZ_SIZE = 9402405;
+
+    const splat = new SplatMesh({
+      url: 'models/murales.spz',
+      onProgress: e => {
+        const total = e.total || SPZ_SIZE;
+        const pct = Math.min(100, e.loaded / total * 100);
+        fill.style.width = pct + '%';
+        status.textContent = `Cargando escena… ${pct.toFixed(0)}%  (${(e.loaded / 1048576).toFixed(1)} MB)`;
+      },
+    });
+    splat.quaternion.set(1, 0, 0, 0);
+    world.add(splat);
+    resetView();
+    splat.initialized.then(() => {
+      loaderEl.classList.add('done');
+    }).catch(err => {
+      console.error(err);
+      status.textContent = 'No se pudo cargar la escena.';
+    });
+
+    // ---- VR (Meta Quest) ----------------------------------------------------
+    const controllerFactory = new XRControllerModelFactory();
+    for (let i = 0; i < 2; i++) {
+      const grip = renderer.xr.getControllerGrip(i);
+      grip.add(controllerFactory.createControllerModel(grip));
+      rig.add(grip);
+    }
+
+    function vrStartPose() {
+      rig.position.set(CENTER[0], 0, CENTER[1]);
+      rig.rotation.set(0, VR_YAW, 0);
+    }
+
+    renderer.xr.addEventListener('sessionstart', () => {
+      walk.unlock();
+      orbit.enabled = false;
+      vrStartPose();
+    });
+    renderer.xr.addEventListener('sessionend', () => { setMode('orbit'); resetView(); });
+
+    // Boton "Entrar a VR": abre la sesion inmersiva o explica como abrirlo en los lentes
+    const bVR = document.getElementById('bVR');
+    const vrHelp = document.getElementById('vrHelp');
+    const vrErr = document.getElementById('vrErr');
+    const shareUrl = location.origin + location.pathname;
+    document.getElementById('vrUrl').textContent = shareUrl.replace(/^https?:\/\//, '');
+    let vrSupported = false;
+
+    navigator.xr?.isSessionSupported('immersive-vr').then(ok => {
+      vrSupported = ok;
+      document.body.classList.toggle('vr-ok', ok);
+    }).catch(() => {});
+
+    function openHelp(error) {
+      vrErr.hidden = !error;
+      vrErr.textContent = error ? 'No se pudo abrir VR: ' + error : '';
+      vrHelp.classList.add('open');
+    }
+    document.getElementById('bClose').onclick = () => vrHelp.classList.remove('open');
+    vrHelp.onclick = e => { if (e.target === vrHelp) vrHelp.classList.remove('open'); };
+    document.getElementById('bCopy').onclick = async e => {
+      try { await navigator.clipboard.writeText(shareUrl); e.target.textContent = 'Copiado ✓'; }
+      catch { e.target.textContent = 'Copia el link de arriba'; }
+    };
+
+    bVR.onclick = async () => {
+      if (!vrSupported) return openHelp(window.isSecureContext ? '' : 'la página necesita HTTPS');
+      try {
+        const session = await navigator.xr.requestSession('immersive-vr',
+          { optionalFeatures: ['local-floor', 'bounded-floor'] });
+        await renderer.xr.setSession(session);
+      } catch (err) {
+        console.error(err);
+        openHelp(err.message || String(err));
+      }
+    };
+
+    // ---- Movimiento con los controles del Quest -----------------------------
+    const up = new THREE.Vector3(0, 1, 0);
+    const head = new THREE.Vector3(), fwd = new THREE.Vector3(), side = new THREE.Vector3();
+    let turnReady = true, resetReady = true;
+
+    function stick(gp) {
+      // mapeo xr-standard: ejes 2/3 = thumbstick; algunos navegadores usan 0/1
+      const x = gp.axes.length >= 4 ? gp.axes[2] : gp.axes[0] || 0;
+      const y = gp.axes.length >= 4 ? gp.axes[3] : gp.axes[1] || 0;
+      return [Math.abs(x) > 0.15 ? x : 0, Math.abs(y) > 0.15 ? y : 0];
+    }
+
+    function vrLocomotion(dt) {
+      const session = renderer.xr.getSession();
+      if (!session) return;
+      // three.js copia la pose de la cabeza a `camera` (local al rig) en cada frame
+      camera.getWorldDirection(fwd);
+      fwd.y = 0;
+      if (fwd.lengthSq() < 1e-6) fwd.set(0, 0, -1);
+      fwd.normalize();
+      side.crossVectors(fwd, up).normalize();
+
+      for (const src of session.inputSources) {
+        const gp = src.gamepad;
+        if (!gp) continue;
+        const [x, y] = stick(gp);
+        if (src.handedness === 'left') {
+          // moverse hacia donde se mira; gatillo = mas rapido
+          const speed = (gp.buttons[0]?.pressed ? 2 : 0.8) * dt;
+          rig.position.addScaledVector(fwd, -y * speed);
+          rig.position.addScaledVector(side, x * speed);
+        } else if (src.handedness === 'right') {
+          // giro por pasos de 30 grados alrededor de la cabeza
+          if (Math.abs(x) > 0.7 && turnReady) {
+            const a = -Math.sign(x) * Math.PI / 6;
+            camera.getWorldPosition(head);
+            rig.position.sub(head).applyAxisAngle(up, a).add(head);
+            rig.rotation.y += a;
+            turnReady = false;
+          } else if (Math.abs(x) < 0.3) {
+            turnReady = true;
+          }
+          // subir / bajar
+          if (Math.abs(y) > 0.4) rig.position.y -= y * 0.8 * dt;
+          // boton A: volver al centro del cuarto
+          const a = gp.buttons[4]?.pressed;
+          if (a && resetReady) vrStartPose();
+          resetReady = !a;
+        }
+      }
+    }
+
+    // ---- Bucle --------------------------------------------------------------
+    const clock = new THREE.Clock();
+
+    renderer.setAnimationLoop(() => {
+      const dt = Math.min(clock.getDelta(), 0.1);
+      if (renderer.xr.isPresenting) {
+        vrLocomotion(dt);
+      } else if (mode === 'walk' && walk.isLocked) {
+        const speed = (keys.has('ShiftLeft') || keys.has('ShiftRight') ? 2 : 0.8) * dt;
+        camera.getWorldDirection(fwd);
+        side.crossVectors(fwd, up).normalize();
+        if (keys.has('KeyW') || keys.has('ArrowUp')) camera.position.addScaledVector(fwd, speed);
+        if (keys.has('KeyS') || keys.has('ArrowDown')) camera.position.addScaledVector(fwd, -speed);
+        if (keys.has('KeyD') || keys.has('ArrowRight')) camera.position.addScaledVector(side, speed);
+        if (keys.has('KeyA') || keys.has('ArrowLeft')) camera.position.addScaledVector(side, -speed);
+        if (keys.has('KeyE') || keys.has('Space')) camera.position.y += speed;
+        if (keys.has('KeyQ')) camera.position.y -= speed;
+      } else if (mode === 'orbit') {
+        orbit.update();
+      }
+      renderer.render(scene, camera);
+    });
+
+    addEventListener('resize', () => {
+      camera.aspect = innerWidth / innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+    });
+
+    window.viewer = { THREE, scene, camera, orbit, world, rig, splat };
+    updateHint();
+  </script>
+</body>
+</html>
